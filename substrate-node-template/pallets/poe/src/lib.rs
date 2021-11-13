@@ -108,7 +108,7 @@ impl<T: Config> Pallet<T> {
           Ok(().into())
         }
 
-        /*
+        
       //转移存证
       #[pallet::weight(0)]
       pub fn transfer_claim(origin: OriginFor<T>, proof: Vec<u8>, dest: T::AccountId) ->
@@ -117,7 +117,7 @@ impl<T: Config> Pallet<T> {
         let sender = ensure_signed(origin)?;
         ensure!(Proofs::<T>::contains_key(&proof), Error::<T>::NoSuchProof);
 
-        let (owner, _block_number) = Proofs::<T>::get(&proof);
+        let (owner, _) = Proofs::<T>::get(&proof).ok_or(Error::<T>::NoSuchProof)?;
 
         ensure!(owner == sender, Error::<T>::NotProofOwner);
 
@@ -129,7 +129,7 @@ impl<T: Config> Pallet<T> {
         //Ok(())
         Ok(().into())
     }
-    */
+    
      
   }
 }
