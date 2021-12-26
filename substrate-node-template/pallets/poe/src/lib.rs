@@ -3,6 +3,24 @@
 // 模块源代码文件
 pub use pallet::*;    //把引用类型暴露出来
 
+//test zhoufy 2021-12-26
+
+//test 
+//step 1 copy template\src\mock.rs、tests.rs
+//step 2 edit template to poe,remove default test case
+//step 3 add mod ref mock/test in lib.rs
+//step 4 cmd: cargo -- test 运行测试用例，-p标签指定测试模块 
+/*
+  cargo -- test -p pallet_poe
+  运行结果 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+*/
+//step 5 完善测试用例tests.rs
+
+#[cfg(test)]    //因为是测试，增加测试标签 
+mod mock;      //测试runtime，拷贝模板下的mock.rs模块后(修改template为poe)，引入模块
+#[cfg(test)]
+mod tests;      //测试用例模块，拷贝模板下的tests.rs模块后，引入模块
+
 ///存证相关的功能模块
 
 
@@ -53,6 +71,10 @@ pub mod pallet {
     ProofAlreadyClaimed,
     NoSuchProof,
     NotProofOwner,
+
+    //zhoufy 2021-12-26 作业 创建存证检查长度，在错误枚举中增加CheckLenthShort/CheckLenthLong
+    CheckLenthShort,
+		CheckLenthLong,
     }
 
 
@@ -63,17 +85,29 @@ pub mod pallet {
 ///可调用函数
 #[pallet::call]
 impl<T: Config> Pallet<T> {
-  //创建存证
-  #[pallet::weight(1000)]
-  pub fn create_claim(
-    origin: OriginFor<T>,   //交易发送方
-    proof: Vec<u8>,         //存证hash值
-    //) -> DispatchResult {
-    ) -> DispatchResultWithPostInfo {
+    //创建存证
+    #[pallet::weight(1000)]
+    pub fn create_claim(
+      origin: OriginFor<T>,   //交易发送方
+      proof: Vec<u8>,         //存证hash值
+      //) -> DispatchResult {
+      ) -> DispatchResultWithPostInfo {
 
       //逻辑： 校验发送方签名、
         let sender = ensure_signed(origin)?;
-      ensure!(!Proofs::<T>::contains_key(&proof), Error::<T>::ProofAlreadyClaimed);
+      
+        let checklen = true;
+        
+        //ensure!(!Proofs::<T>::contains_key(&proof), Error::<T>::ProofAlreadyClaimed);        
+        {
+          //zhoufy 2021-12-26 作业 创建存证检查长度
+          ensure!(proof.len() >= 0 as usize, Error::<T>::CheckLenthShort);
+          ensure!(proof.len() <= 65536 as usize, Error::<T>::CheckLenthLong);
+    
+          // Verify that the specified proof has not already been claimed.
+          ensure!(!Proofs::<T>::contains_key(&proof), Error::<T>::ProofAlreadyClaimed);
+        }
+
       let current_block = <frame_system::Pallet<T>>::block_number();
       // 存储发送方块
       Proofs::<T>::insert(&proof, (&sender, current_block)); //key value
