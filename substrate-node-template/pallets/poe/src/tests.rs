@@ -1,4 +1,4 @@
-﻿//test case
+//test case
 //step 1 remove default
 //step 2 lib.rs add mod mock/tests
 
@@ -34,130 +34,134 @@ fn correct_error_for_none_value() {
 
 //step 3 add test case
 /*    
-//为lib.rs 创建存证create_claim()创建测试用例
+//为lib.rs 创建测试用例
 
 */		
 
 
 //------------------------------------------------------------------------------
 
-#[test]//测试用例
-fn create_claim_works() {
-
-	//mock中的测试帮助环境
-	//new_test_ext().execute_with(execute:||{
-    new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        assert_ok!(PoeModule::create_claim(Origin::signed(1), claim.clone()));
-        assert_eq!(Proofs::<Test>::get(&claim), Some((1, frame_system::Pallet::<Test>::block_number())));
-    })
-}
 #[test]
-fn create_claim_failed_when_claim_already_exist() {
+fn create_works() {
     new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        
+        assert!(Kitties::<Test>::contains_key(0));
+        assert_eq!(Owner::<Test>::get(0), Some(1));
+        assert_eq!(KittiesCount::<Test>::get(), Some(1));
+        System::assert_has_event(mock::Event::KittiesModule(Event::KittyCreate(1,0)));
+    }); 
+}
 
+#[test]
+fn create_failed() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(KittiesModule::create(Origin::signed(4)), Error::<Test>::InsufficientBalance);
+        KittiesCount::<Test>::put(u32::max_value());
         assert_noop!(
-            PoeModule::create_claim(Origin::signed(1), claim),
-            Error::<Test>::ProofAlreadyClaimed
+            KittiesModule::create(Origin::signed(1)),
+            Error::<Test>::KittiesCountOverflow 
         );
+    }); 
+}
+
+#[test]
+fn transfer_works() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_ok!(KittiesModule::transfer(Origin::signed(1), 2, 0));
+        assert!(Kitties::<Test>::contains_key(0));
+        assert_eq!(Owner::<Test>::get(0), Some(2));
+        assert_eq!(KittiesCount::<Test>::get(), Some(1));
+        System::assert_has_event(mock::Event::KittiesModule(Event::KittyTransfer(1, 2, 0)));
     })
 }
 
 #[test]
-fn create_claim_failed_when_claim_is_too_long() {
+fn transfer_failed() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_noop!(KittiesModule::transfer(Origin::signed(2), 3, 0), Error::<Test>::NotKittyOwner);        
+    }) 
+}
+
+#[test]
+fn breed_works() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_ok!(KittiesModule::breed(Origin::signed(1), 0, 1));
+        assert!(Kitties::<Test>::contains_key(0));
+        assert_eq!(Owner::<Test>::get(0), Some(1));
+        assert_eq!(Owner::<Test>::get(1), Some(1));
+        assert_eq!(Owner::<Test>::get(2), Some(1));
+        assert_eq!(KittiesCount::<Test>::get(), Some(3));
+        System::assert_has_event(mock::Event::KittiesModule(Event::KittyCreate(1,2)));
+    }) 
+}
+
+#[test]
+fn breed_failed() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_noop!(KittiesModule::breed(Origin::signed(1), 0, 0), Error::<Test>::SameParentIndex);
+        assert_noop!(KittiesModule::breed(Origin::signed(1), 0, 1), Error::<Test>::InvalidKittyIndex);
+        assert_noop!(KittiesModule::breed(Origin::signed(1), 1, 0), Error::<Test>::InvalidKittyIndex);
+
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        KittiesCount::<Test>::put(u32::max_value());
+        assert_noop!(
+            KittiesModule::breed(Origin::signed(1), 0, 1),
+            Error::<Test>::KittiesCountOverflow 
+        );
+    }) 
+}
+
+#[test]
+fn sell_kitty_work() {
 	new_test_ext().execute_with(|| {
-        let claim: Vec<u8> = (0..33).collect();
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_noop!(
-            PoeModule::create_claim(Origin::signed(1), claim),
-            Error::<Test>::ProofTooLong
-        );
-    })
+		assert_ok!(KittiesModule::create(Origin::signed(1)));
+		assert_ok!(KittiesModule::sell_kitty(Origin::signed(1), 0, Some(666)));
+        assert!(Kitties::<Test>::contains_key(0));
+        assert_eq!(Owner::<Test>::get(0), Some(1));
+        assert_eq!(Price::<Test>::get(0), Some(666));
+        assert_eq!(KittiesCount::<Test>::get(), Some(1));
+        System::assert_has_event(mock::Event::KittiesModule(Event::KittySale(1, 0, Some(666))));
+	})
 }
 
 #[test]
-fn create_claim_failed_when_claim_is_too_short() {
+fn sell_kitty_failed() {
 	new_test_ext().execute_with(|| {
-        let claim: Vec<u8> = vec![];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_noop!(
-            PoeModule::create_claim(Origin::signed(1), claim),
-            Error::<Test>::ProofTooShort
-        );
-    })
+		assert_ok!(KittiesModule::create(Origin::signed(1)));
+		assert_noop!(KittiesModule::sell_kitty(Origin::signed(2), 0, Some(666)), Error::<Test>::NotKittyOwner);
+	})
 }
 
 #[test]
-fn revoke_claim_works() {
+fn buy_kitty_works() {
     new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_ok!(PoeModule::revoke_claim(Origin::signed(1), claim));
-    })
+        assert_ok!(KittiesModule::create(Origin::signed(1)));
+        assert_ok!(KittiesModule::sell_kitty(Origin::signed(1), 0, Some(666)));
+        assert_eq!(Price::<Test>::contains_key(0), true);
+        assert_eq!(Price::<Test>::get(0), Some(666));
+        assert_ok!(KittiesModule::buy_kitty(Origin::signed(2), 0));
+        assert_eq!(Price::<Test>::contains_key(0), false);
+        assert!(Kitties::<Test>::contains_key(0));
+        assert_eq!(Owner::<Test>::get(0), Some(2));
+        assert_eq!(KittiesCount::<Test>::get(), Some(1));
+        System::assert_has_event(mock::Event::KittiesModule(Event::KittyTransfer(1, 2, 0)));
+    }) 
 }
 
 #[test]
-fn revoke_claim_failed_when_claim_is_not_exist() {
+fn buy_kitty_failed() {
     new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-
-        assert_noop!(
-            PoeModule::revoke_claim(Origin::signed(1), claim),
-            Error::<Test>::NoSuchProof
-        );
-    })
-}
-
-#[test]
-fn revoke_claim_failed_with_wrong_owner() {
-    new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_noop!(
-            PoeModule::revoke_claim(Origin::signed(2), claim),
-            Error::<Test>::NotProofOwner
-        );
-    })
-}
-
-#[test]
-fn transfer_claim_works() {
-    new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_ok!(PoeModule::transfer_claim(Origin::signed(1), 2, claim.clone()));
-        assert_eq!(Proofs::<Test>::get(&claim), Some((2, frame_system::Pallet::<Test>::block_number())));
-    })
-}
-
-#[test]
-fn transfer_claim_failed_when_claim_is_not_exist() {
-    new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-
-        assert_noop!(
-            PoeModule::transfer_claim(Origin::signed(1), 2, claim),
-            Error::<Test>::NoSuchProof
-        );
-    })
-}
-
-#[test]
-fn transfer_claim_failed_with_wrong_owner() {
-    new_test_ext().execute_with(|| {
-        let claim = vec![0, 1];
-        let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
-
-        assert_noop!(
-            PoeModule::transfer_claim(Origin::signed(2), 3, claim),
-            Error::<Test>::NotProofOwner
-        );
-    })
+		assert_ok!(KittiesModule::create(Origin::signed(1)));
+		assert_noop!(KittiesModule::buy_kitty(Origin::signed(2), 1), Error::<Test>::InvalidKittyIndex);
+		assert_noop!(KittiesModule::buy_kitty(Origin::signed(1), 0), Error::<Test>::BuyFromSelf);
+		assert_noop!(KittiesModule::buy_kitty(Origin::signed(2), 0), Error::<Test>::KittyNotForSale);
+		assert_ok!(KittiesModule::sell_kitty(Origin::signed(1), 0, Some(666)));
+		assert_noop!(KittiesModule::buy_kitty(Origin::signed(4), 0), Error::<Test>::InsufficientBalance);
+    }) 
 }
