@@ -3,8 +3,6 @@
 // 模块源代码文件
 pub use pallet::*;    //把引用类型暴露出来
 
-//test zhoufy 2021-12-26
-
 //test 
 //step 1 copy template\src\mock.rs、tests.rs
 //step 2 edit template to poe,remove default test case
@@ -21,149 +19,202 @@ mod mock;      //测试runtime，拷贝模板下的mock.rs模块后(修改templa
 #[cfg(test)]
 mod tests;      //测试用例模块，拷贝模板下的tests.rs模块后，引入模块
 
-///存证相关的功能模块
+//Kitties相关的功能模块
 
 
 #[frame_support::pallet]
 pub mod pallet {
-  use frame_support::{
-      dispatch::DispatchResultWithPostInfo,
-      pallet_prelude::*
-    };
-  use frame_system::pallet_prelude::*;
-  use sp_std::vec::Vec; 
+    use frame_support::{
+        dispatch::{fmt::Debug, DispatchResult},
+        pallet_prelude::*,
+        traits::{Randomness, ReservableCurrency, Currency, ExistenceRequirement},
+        transactional,
+    };    
+    use frame_system::pallet_prelude::*;
+    use codec::{Encode, Decode};
+    use sp_io::hashing::blake2_128;
+    use scale_info::TypeInfo;
+    use sp_runtime::traits::{MaybeDisplay, AtLeast32Bit, Bounded};
 
-  
-  /// 模块配置接口
-  #[pallet::config]
-  pub trait Config: frame_system::Config {
-  type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
-  }
+    #[derive(Encode, Decode, TypeInfo)]
+    pub struct Kitty(pub [u8; 16]);
 
-  ///Pallet结构体承载功能模块，依赖存储单元
-  #[pallet::pallet]
-  #[pallet::generate_store(pub(super) trait Store)]
-  pub struct Pallet<T>(_);
+    type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-  ///定义存储单元模块，只有一个Proofs存储存证，类型StorageMap
-  #[pallet::storage]
-  #[pallet::getter(fn proofs)]
-  pub type Proofs<T:Config> = StorageMap<
-    _,
-    Blake2_128Concat,
-    Vec<u8>,                        //key
-    (T::AccountId,T::BlockNumber)   //value,用户ID及存入存证区块，来自系统模块
-  >;
-
-  #[pallet::event]
-  #[pallet::generate_deposit(pub(super) fn deposit_event)]
-  pub enum Event<T: Config> {
-    //创建存证触发的事件
-    ClaimCreated(T::AccountId, Vec<u8>),
-    //撤销存证触发的事件
-    ClaimRevoked(T::AccountId, Vec<u8>),
-    //转移存证触发的事件
-    ClaimTransfered(T::AccountId, T::AccountId, Vec<u8>),
-  }
-
-  #[pallet::error]
-  pub enum Error<T> {
-    ProofAlreadyClaimed,
-    NoSuchProof,
-    NotProofOwner,
-
-    //zhoufy 2021-12-26 作业 创建存证检查长度，在错误枚举中增加CheckLenthShort/CheckLenthLong
-    CheckLenthShort,
-		CheckLenthLong,
+    #[pallet::config]
+    pub trait Config: frame_system::Config {
+        type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+        type Randomness: Randomness<Self::Hash, Self::BlockNumber>;
+        type KittyIndex: Parameter
+            + Member 
+            + MaybeSerializeDeserialize 
+            + Debug 
+            + Default
+            + MaybeDisplay
+            + AtLeast32Bit
+            + Copy
+            + Encode;
+        type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
+        #[pallet::constant]
+        type KittyDepositBase: Get<BalanceOf<Self>>;
     }
 
+    #[pallet::pallet]
+    #[pallet::generate_store(pub(super) trait Store)]
+    pub struct Pallet<T>(_);
 
-    //空的函数，预留
-  #[pallet::hooks]
-  impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {}
+    #[pallet::storage]
+    #[pallet::getter(fn kitties_count)]
+    pub type KittiesCount<T: Config> = StorageValue<_, T::KittyIndex>;
 
-///可调用函数
-#[pallet::call]
-impl<T: Config> Pallet<T> {
-    //创建存证
-    #[pallet::weight(1000)]
-    pub fn create_claim(
-      origin: OriginFor<T>,   //交易发送方
-      proof: Vec<u8>,         //存证hash值
-      //) -> DispatchResult {
-      ) -> DispatchResultWithPostInfo {
+    #[pallet::storage]
+    #[pallet::getter(fn kitties)]
+    pub type Kitties<T: Config> = StorageMap<_, Blake2_128Concat, T::KittyIndex, Option<Kitty>, ValueQuery>;
 
-      //逻辑： 校验发送方签名、
-        let sender = ensure_signed(origin)?;
-      
-        let checklen = true;
-        
-        //ensure!(!Proofs::<T>::contains_key(&proof), Error::<T>::ProofAlreadyClaimed);        
-        {
-          //zhoufy 2021-12-26 作业 创建存证检查长度
-          ensure!(proof.len() >= 0 as usize, Error::<T>::CheckLenthShort);
-          ensure!(proof.len() <= 65536 as usize, Error::<T>::CheckLenthLong);
-    
-          // Verify that the specified proof has not already been claimed.
-          ensure!(!Proofs::<T>::contains_key(&proof), Error::<T>::ProofAlreadyClaimed);
-        }
+    #[pallet::storage]
+    #[pallet::getter(fn owner)]
+    pub type Owner<T: Config> = StorageMap<_, Blake2_128Concat, T::KittyIndex, Option<T::AccountId>, ValueQuery>;
 
-      let current_block = <frame_system::Pallet<T>>::block_number();
-      // 存储发送方块
-      Proofs::<T>::insert(&proof, (&sender, current_block)); //key value
-      //出发事件
-      Self::deposit_event(Event::ClaimCreated(sender, proof));
-      //Ok(())
-      Ok(().into())
-      }
-      //撤销存证
-      #[pallet::weight(1001)]
-      pub fn revoke_claim(
-        origin: OriginFor<T>,
-        proof: Vec<u8>,
-        //) -> DispatchResult {
-        ) -> DispatchResultWithPostInfo {
-          //校验
-          let sender = ensure_signed(origin)?;
+    #[pallet::storage]
+    #[pallet::getter(fn price)]
+    pub type Price<T: Config> = StorageMap<_, Blake2_128Concat, T::KittyIndex, Option<BalanceOf<T>>, ValueQuery>;
 
-          //存储里是否有，  15:49
-          //ensure!(Proofs::<T>::contains_key(&proof), Error::<T>::NoSuchProof);          
-          let (owner, _) = Proofs::<T>::get(&proof).ok_or(Error::<T>::NoSuchProof)?;
-
-          
-          ensure!(sender == owner, Error::<T>::NotProofOwner);
-
-          // 调用，从存储里删除
-          Proofs::<T>::remove(&proof);
-
-          // Emit an event that the claim was erased.
-          Self::deposit_event(Event::ClaimRevoked(sender, proof));
-          //Ok(())
-          Ok(().into())
-        }
-
-        
-      //转移存证
-      #[pallet::weight(0)]
-      pub fn transfer_claim(origin: OriginFor<T>, proof: Vec<u8>, dest: T::AccountId) ->
-      // DispatchResult {
-      DispatchResultWithPostInfo {
-        let sender = ensure_signed(origin)?;
-        ensure!(Proofs::<T>::contains_key(&proof), Error::<T>::NoSuchProof);
-
-        let (owner, _) = Proofs::<T>::get(&proof).ok_or(Error::<T>::NoSuchProof)?;
-
-        ensure!(owner == sender, Error::<T>::NotProofOwner);
-
-        let current_block = <frame_system::Pallet<T>>::block_number();
-
-        Proofs::<T>::insert(&proof, (&dest, current_block));
-
-        Self::deposit_event(Event::ClaimTransfered(sender,dest,proof));
-        //Ok(())
-        Ok(().into())
+    #[pallet::event]
+    #[pallet::generate_deposit(pub(super) fn deposit_event)]
+    pub enum Event<T: Config> {
+        KittyCreate(T::AccountId, T::KittyIndex),
+        KittyTransfer(T::AccountId, T::AccountId, T::KittyIndex),
+        KittySale(T::AccountId, T::KittyIndex, Option<BalanceOf<T>>),
     }
-    
-     
-  }
+
+    #[pallet::error]
+    pub enum Error<T> {
+        KittiesCountOverflow,
+        NotKittyOwner,
+        SameParentIndex,
+        InvalidKittyIndex,
+        InsufficientBalance,
+        BuyFromSelf,
+        KittyNotForSale,
+    }
+
+    #[pallet::call]
+    impl<T: Config> Pallet<T> {
+        #[pallet::weight(1_000)]
+        pub fn create(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let kitty_id = Self::get_id();
+            ensure!(kitty_id != T::KittyIndex::max_value(), Error::<T>::KittiesCountOverflow);
+            let dna = Self::random_value(&who);
+            let deposit = T::KittyDepositBase::get();
+            T::Currency::reserve(&who, deposit.clone()).map_err(|_| Error::<T>::InsufficientBalance)?;
+
+            Kitties::<T>::insert(kitty_id, Some(Kitty(dna)));
+            Owner::<T>::insert(kitty_id, Some(who.clone()));
+            KittiesCount::<T>::put(kitty_id + 1u32.into());
+
+            Self::deposit_event(Event::KittyCreate(who, kitty_id));
+            Ok(())
+        }
+
+        #[pallet::weight(1_000)]
+        pub fn transfer(
+            origin: OriginFor<T>, 
+            new_owner: T::AccountId, 
+            kitty_id: T::KittyIndex,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Some(who.clone()) == Owner::<T>::get(kitty_id), Error::<T>::NotKittyOwner);
+            Owner::<T>::insert(kitty_id, Some(new_owner.clone()));
+            Self::deposit_event(Event::KittyTransfer(who, new_owner, kitty_id));
+            Ok(())
+        }
+
+        #[pallet::weight(1_000)]
+        pub fn breed(
+            origin: OriginFor<T>,
+            kitty_id1: T::KittyIndex,
+            kitty_id2: T::KittyIndex,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(kitty_id1 != kitty_id2, Error::<T>::SameParentIndex);
+            let kitty1 = Self::kitties(kitty_id1).ok_or(Error::<T>::InvalidKittyIndex)?;
+            let kitty2 = Self::kitties(kitty_id2).ok_or(Error::<T>::InvalidKittyIndex)?;
+            let kitty_id = Self::get_id();
+            ensure!(kitty_id != T::KittyIndex::max_value(), Error::<T>::KittiesCountOverflow);
+            let dna = Self::breed_dna(&who, &kitty1, &kitty2);
+            Kitties::<T>::insert(kitty_id, Some(Kitty(dna)));
+            Owner::<T>::insert(kitty_id, Some(who.clone()));
+            KittiesCount::<T>::put(kitty_id + 1u32.into());
+            Self::deposit_event(Event::KittyCreate(who, kitty_id));
+            Ok(())
+        }
+
+        #[pallet::weight(1_000)]
+        pub fn sell_kitty(
+            origin: OriginFor<T>,
+            kitty_id: T::KittyIndex,
+            price: Option<BalanceOf<T>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Some(who.clone()) == Owner::<T>::get(kitty_id), Error::<T>::NotKittyOwner);
+
+            Price::<T>::insert(kitty_id, price);
+            Self::deposit_event(Event::KittySale(who, kitty_id, price));
+            Ok(())
+        }
+
+        #[transactional]
+        #[pallet::weight(1_000)]
+        pub fn buy_kitty(origin: OriginFor<T>, kitty_id: T::KittyIndex) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Kitties::<T>::contains_key(kitty_id), Error::<T>::InvalidKittyIndex);
+            let from = Owner::<T>::get(kitty_id).unwrap();
+            ensure!(who.clone() != from, Error::<T>::BuyFromSelf);
+            let price = Self::price(kitty_id).ok_or(Error::<T>::KittyNotForSale)?;
+            let reserve = T::KittyDepositBase::get();
+            T::Currency::reserve(&who, reserve).map_err(|_| Error::<T>::InsufficientBalance)?;
+            T::Currency::unreserve(&from, reserve);
+
+            T::Currency::transfer(
+                &who, &from, 
+                price, ExistenceRequirement::KeepAlive,
+            )?;
+
+            Price::<T>::remove(kitty_id);  
+            Owner::<T>::insert(kitty_id, Some(who.clone()));
+
+            Self::deposit_event(Event::KittyTransfer(from, who, kitty_id));
+            Ok(())
+        }
+    }
+
+    impl<T: Config> Pallet<T> {
+        pub fn random_value(sender: &T::AccountId) -> [u8; 16] {
+            let payload = (
+                T::Randomness::random_seed(),
+                &sender,
+                <frame_system::Pallet<T>>::extrinsic_index(), 
+            );
+            payload.using_encoded(blake2_128)
+        }
+
+        pub fn get_id() -> T::KittyIndex {
+            match Self::kitties_count() {
+                Some(id) => id,
+                None => 0u32.into(),
+            }
+        }
+
+        pub fn breed_dna(who: &T::AccountId, kitty1: &Kitty, kitty2: &Kitty) -> [u8; 16] {
+            let dna1 = kitty1.0;
+            let dna2 = kitty2.0;
+            let mut mix_dna = Self::random_value(&who);
+            for i in 0..dna1.len() {
+                mix_dna[i] = (mix_dna[i] & dna1[i]) | (!mix_dna[i] & dna2[i]);
+            }
+            mix_dna
+        } 
+    }
 }
